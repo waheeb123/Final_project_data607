@@ -1,0 +1,232 @@
+---
+title: "Untitled"
+author: "Rstudio"
+date: "2023-04-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+library(sparklyr)
+library(tidyverse)
+library(fs)
+library(DBI)
+library(httr)
+library(jsonlite)
+
+```
+
+
+# connection to Spark ____
+
+?spark_connect
+
+```{r}
+?spark_connect
+```
+
+
+# configuration setup 
+
+```{r}
+conf<-list()
+conf$`sparklyr.cores.local`      <- 6
+conf$`sparklyr.shell>driver-memory` <-"16G"
+conf$spark.memory.fraction         <- 0.9
+```
+
+
+
+# Connects to spark Locally 
+
+```{r}
+sc <- spark_connect(
+   master = "local",
+   version = "3.3.2",
+   config = conf
+)
+sc
+```
+
+# web interface
+
+```{r}
+spark_web(sc)
+```
+
+
+# adding data to spark 
+
+```{r}
+library(httr)
+library(jsonlite)
+
+url <- "https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=IBM&interval=1min&apikey=6L6JB85OXLJ7LGFV"
+
+response <- GET(url)
+
+ours <- content(response, as = "text") %>% fromJSON()
+
+print(ours)
+
+```
+
+
+add the data into a data frame
+
+```{r}
+ours <- as.data.frame(t(sapply(ours$`Time Series (1min)`, function(x) unlist(x))))
+
+```
+
+
+```{r}
+head(ours)
+```
+
+
+```{r}
+library(shiny)
+
+# Define the UI
+ui <- fluidPage(
+  titlePanel("IBM Intraday Stock Prices"),
+  dataTableOutput("table")
+)
+
+# Define the server logic
+server <- function(input, output) {
+  url <- "https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=IBM&interval=1min&apikey=6L6JB85OXLJ7LGFV"
+  response <- GET(url)
+  data <- content(response, as = "text") %>% fromJSON()
+  data <- as.data.frame(t(sapply(data$`Time Series (1min)`, function(x) unlist(x))))
+  output$table <- renderDataTable(data)
+}
+
+# Run the app
+shinyApp(ui = ui, server = server)
+
+```
+
+
+
+
+
+```{r eval=FALSE}
+
+{r eval=FALSE}
+ours <- copy_to(sc,data,"ours")
+```
+
+
+
+```{r}
+src_tbls(sc)
+```
+
+what available data? 
+
+
+```{r eval=FALSE}
+tbl(sc,"ours")
+```
+
+
+
+```{r}
+nrow(ours)
+```
+
+ get the number of rows 
+ 
+```{r eval=FALSE}
+sdf_nrow(ours)
+```
+
+
+# data wrangling 
+
+
+
+```{r}
+count(ours)
+```
+
+```{r}
+library(dplyr)
+ours %>%
+  summarise(across(everything(), mean, na.rm = TRUE))
+
+```
+
+
+# grouped functions 
+
+```{r eval=FALSE}
+library(dplyr)
+
+ours %>%
+  mutate(transmission = case_when(am == 1 ~ "automatic", TRUE ~ "manual")) %>%
+  group_by(transmission) %>%
+  summarise(across(everything(), mean, na.rm = TRUE))
+
+```
+
+
+#  modling 
+
+```{r eval=FALSE}
+modle <- ml_linear_regression(ours,1. open ~hp)
+modle
+```
+
+# predict new data 
+
+```{r}
+more_cars <- copy_to(sc, tibble(hp= 260 *2 *1:10))
+```
+
+```{r eval=FALSE}
+modle %>%
+  ml_predict(more_cars)
+```
+
+
+# streaming using kafka 
+
+
+```{r}
+dir_create("stream_input")
+```
+
+
+```{r}
+mtcars %>% write_csv("stream_input/cars_1.csv")
+```
+
+# start stream ___
+
+```{r}
+stream <- stream_read_csv(sc,"stream_input/")
+```
+
+
+```{r eval=FALSE}
+
+stream %>% 
+  select(mpg,cyl,disp) %>% 
+  stream_write_csv("stream_output/")
+  
+```
+
+
+
+
+
+
+
